@@ -73,7 +73,7 @@ movies_link_finder <- function(x){
 movies_link <- c(sapply(url,movies_link_finder))
 ```
 
-```{R}
+```{R, warning = FALSE}
 # This functions purpose is to find the title of the movie from its html file
 # The function will take in an array which contains the specific movies html
 # The end result will be a return of the movies title.
