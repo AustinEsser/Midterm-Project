@@ -1,0 +1,601 @@
+---
+title: "STAT 345 Midterm Project"
+date: "Due April 9"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+font: 12pt
+---
+https://github.com/AustinEsser/Midterm-Project.git
+> "NOBODY KNOWS ANYTHING. Not one person in the entire motion picture field knows for a certainty what’s going to work. Every time out it’s a guess—and, if you’re lucky, an educated one." William Goldman, _Adventures in the Screen Trade_
+
+Your data for the midterm project consists of the 1000 highest rated movies on the Internet Movie Database (IMDB). You can find the first 50 movies [here](https://www.imdb.com/search/title/?groups=top_1000&start=1), with navigational links to the other 950 movies.
+
+Each IMDB page records a large amount of information about each movie. We are interested in the following:
+
+   * The average rating of the movie by IMDB users. - 1
+   * The number of ratings of the movie.  - 2
+   * The year the movie was released.     - 3
+   * The gross revenue of the movie (US). - 4
+   * The budget for the movie.            - 5
+   * The movie's title.                   -
+   * The movie’s genre(s).                -
+   * The four top-billed actors.          
+   * The text of the 25 "most helpful" reviews, as well as their helpfulness (ratio of helpful votes out of total votes.)  -
+    
+Note that the first five (and last) variables are numeric, and the genre, title, and reviews are strings. In some cases, some of these variables may be missing for a particular movie.
+
+In some cases, the business information page lists multiple gross revenues, depending on the country, or gross receipts by different dates. In case of ambiguity, we are interested in gross receipts for the US, and want to use the figure for the latest available date. If no gross revenue figure is available for the US, treat the gross revenue as missing.
+
+**General advice:** Get started on this one early. If you wait to the last minute, it will not go well.
+
+1. (30 pts) Write code to extract the variables described above from all 1000 movies, and store it in a data frame. For full credit, you should write a function which can extract this information from an arbitrary movie code (or url), and then further code which uses that function and applies it to all 1000 movies. For full credit, your code should avoid loops in favor of vectorized operations and apply (and sapply, lapply, etc., as convenient). Your code should handle missing values appropriately, and should not convert categorical variables into numbers, or numbers into strings, etc. 
+
+_Victory conditions:_ You have a data frame with 1000 rows and columns that contain the first six variables, as well as each genre, review, and review helpfulness scores in appropriately formatted columns. Columns have short but clear names. Most rows have no missing values; the few rows where there are missing values have NA in the appropriate places.
+```{r}
+library(stringr)
+library(rvest)
+library(readr)
+library(purrr)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(scales)
+library(tidyverse)
+library(tidytext)
+```
+
+```{R}
+# Creates the url so you can access each page to get movie title
+numbers <- as.character(c(seq(1,951, by = 50)))
+url <- paste("https://www.imdb.com/search/title/?groups=top_1000&start=",numbers, sep = "")
+
+
+# This function purpose is to find the link to different titles of each movie
+# The function input is x which is a vector containing the possible pages a movie title can be accessed from on IMDb top 1000.
+# The function will return a titleLink vector which has all the links to each top 1000 titles.
+movies_link_finder <- function(x){
+   movies_link <- vector()
+   n <- length(x)
+   for (i in 1:n) {
+      html <- read_html(x[i])
+      movies_html <- html_nodes(html,".lister-item-header a")
+      movies_html <- html_attr(movies_html, "href")
+      movies_html<- str_replace_all(movies_html,"/title/" ,"")
+      movies <- str_replace_all(movies_html,"/.+" ,"")
+      movies_link <- paste("https://www.imdb.com/title/",movies, sep = "")
+   }
+   return(movies_link)   
+}
+
+# Creates the vector with all the movies direct links
+movies_link <- c(sapply(url,movies_link_finder))
+```
+
+```{R}
+# This functions purpose is to find the title of the movie from its html file
+# The function will take in an array which contains the specific movies html
+# The end result will be a return of the movies title.
+movies_title <- function(html){
+   movies_name <- html_nodes(html, "h1")
+   movies_name <- html_text(movies_name, trim = TRUE)
+   movies_year <- html_nodes(html, "#titleYear a")
+   movies_year <- html_text(movies_year, trim = TRUE)
+   movies_year <- str_replace_all(movies_year, " ", "")
+   remove <- str_replace_all(movies_year, " ", "")
+   movies_name <- str_replace(movies_name, remove , "")
+   movies_name <- gsub("[()]", "", movies_name)
+   movies_name <- str_trim(movies_name)
+   return(movies_name)
+}
+
+
+# This functions purpose is to find the year of the movie from its html file
+# The function will take in an array which contains the specific movie link html
+# The end result will be a return of the movies year.
+movies_year <- function(html){
+   movies_year <- html_nodes(html, "#titleYear a")
+   movies_year <- html_text(movies_year, trim = TRUE)
+   movies_year <- as.integer(str_replace_all(movies_year,"[[:punct:]]",""))
+   return(movies_year)
+}
+
+# This functions purpose is to find the average rating of the movie from its html file
+# The function will take in a vector which contains the specific movies html
+# The end result will be a return of the movies average_rating.
+movies_average_rating <- function(html){
+   average_rating <- html_nodes(html, "strong span")
+   average_rating <- as.double(html_text(average_rating, trim = TRUE))
+   return(average_rating)
+}
+
+# This functions purpose is to find the number of ratings a movie recieved
+# The function will take in an array which contains the specific movie html
+# The end result will be a return of the movies number of ratings.
+movies_num_ratings <- function(html){
+   num_ratings <- html_nodes(html, ".small")
+   num_ratings <- html_text(num_ratings, trim = TRUE)
+   num_ratings <- num_ratings[2]
+   num_ratings <- as.integer(str_replace_all(num_ratings,"[[:punct:]]",""))
+   return(num_ratings)
+}
+
+# This functions purpose is to find the genre of the movie from its html file
+# The function will take in a vector which contains the specific movie link html
+# The end result will be a return of the genres.
+movies_genre <- function(html){
+   movies_genre <- html_nodes(html, ".subtext a+ a , .subtext a:nth-child(4)")
+   movies_genre <- html_text(movies_genre, trim = TRUE)
+   movies_genre <- str_replace_all(movies_genre,"[[:punct:]]","")
+   movies_genre <- paste(movies_genre, collapse = ", ")
+   return(movies_genre)
+}
+
+# This functions purpose is to find the budget of the movie from its html file
+# The function will take in a vector which contains the specific movie html
+# The end result will be a return of the movies budget.
+movies_budget <- function(html){
+   movies_budget <- html_nodes(html, ".txt-block")
+   movies_budget <- html_text(movies_budget, trim = TRUE)
+   budget<-str_detect(movies_budget, "Budget:")
+   number <- which(budget == TRUE)
+   movies_budget <- movies_budget[number[1]]
+   movies_budget <- as.integer(gsub("[^0-9.-]", "", movies_budget))
+   return(movies_budget)
+   
+}
+
+# This functions purpose is to find the usgross of the movie from its html file
+# The function will take in a vector which contains the specific movie html
+# The end result will be a return of the movies usgross.
+movies_usgross <- function(html){
+   movies_usgross <- html_nodes(html, ".txt-block")
+   movies_usgross <- html_text(movies_usgross, trim = TRUE)
+   usgross<-str_detect(movies_usgross, "Gross USA:")
+   number <- which(usgross == TRUE)
+   movies_usgross <- movies_usgross[number[1]]
+   movies_usgross <- as.integer(gsub("[^0-9.-]", "", movies_usgross))
+   return(movies_usgross)
+   
+}
+
+# This functions purpose is to find the top 5 billed actors of the movie from its html file
+# The function will take in a vector which contains the specific movies html
+# The end result will be a return of the movies top 5 billed actors.
+movies_actors <- function(html){
+   movies_actors <- html_nodes(html, ".even:nth-child(5) .primary_photo+ td a , .odd:nth-child(4) .primary_photo+ td a , .even:nth-child(3) .primary_photo+ td a , .odd:nth-child(2) .primary_photo+ td a")
+   movies_actors <- html_text(movies_actors, trim = TRUE)
+   movies_actors <- paste(movies_actors, collapse = ", ")
+   return(movies_actors)
+}
+
+# This functions purpose is to find the reviews of the movie from its html file
+# The function will take in a vector which contains the specific movie html
+# The end result will be a return of the movies reviews.
+movies_reviews <- function(x){
+   x <- paste(x,"/reviews?spoiler=hide&sort=helpfulnessScore&dir=desc&ratingFilter=0", sep = "")
+   html <- read_html(x)
+   reviews <- vector()
+   movies_reviews <- html_nodes(html, ".show-more__control")
+   movies_reviews <- html_text(movies_reviews, trim = TRUE)
+   not_reviews<-str_detect(movies_reviews, "")
+   remove_empties <- which(not_reviews == FALSE)
+   movies_reviews <- movies_reviews[-(remove_empties)]
+   reviews <- movies_reviews
+   while(length(reviews) < 25)
+      reviews <- append(reviews, NA)
+   
+   names(reviews) <- paste("Review", 1:25)
+   return(reviews)
+}
+
+# This functions purpose is to find the reviews ratio for each review.
+# The function will take in a vector which contains the specific movies html
+# The end result will be a return all the movies review ratios for reviews for movie.
+movies_reviews_ratio <- function(x){
+   x <- paste(x,"/reviews?spoiler=hide&sort=helpfulnessScore&dir=desc&ratingFilter=0", sep = "")
+   html <- read_html(x)
+   movies_reviews_ratio <- html_nodes(html, ".text-muted")
+   movies_reviews_ratio <- html_text(movies_reviews_ratio, trim = TRUE)
+   n <- length(movies_reviews_ratio)
+   numbers <- vector()
+   print(numbers)
+   for (i in 1:n) {
+      review<-movies_reviews_ratio[i]
+      review <- strsplit(review," ")
+      new <- review[[1]]
+      liked <- new[1]
+      out_of <- new[4]
+      liked <- as.double(str_replace_all(liked,"[[:punct:]]",""))
+      out_of <- as.double(str_replace_all(out_of,"[[:punct:]]",""))
+      number <- liked/out_of
+      numbers <- c(numbers,number)
+   }
+   while(length(numbers) < 25)
+      reviews <- append(numbers, NA)
+   
+   names(numbers)<- paste("Review_Helpfulness", 1:25)
+   return(numbers)
+}
+
+# This functions purpose is to alternate columns when adding two dataframes
+# The function will take in an two data frames.
+# The end result will be a return a dataframe.
+zipFastener <- function(df1, df2, along=2)
+{
+    # parameter checking
+    if(!is.element(along, c(1,2))){
+        stop("along must be 1 or 2 for rows and columns
+                                              respectively")
+    }
+    # if merged by using zip feeding along the columns, the
+    # same no. of rows is required and vice versa
+    if(along==1 & (ncol(df1)!= ncol(df2))) {
+        stop ("the no. of columns has to be equal to merge
+               them by zip feeding")
+    }
+    if(along==2 & (nrow(df1)!= nrow(df2))) {
+        stop ("the no. of rows has to be equal to merge them by
+               zip feeding")
+    }
+    # zip fastener preperations
+    d1 <- dim(df1)[along]
+    d2 <- dim(df2)[along]
+    i1 <- 1:d1           # index vector 1
+    i2 <- 1:d2 + d1      # index vector 2
+    # set biggest dimension dMax
+    if(d1==d2) {
+        dMax <- d1
+    } else if (d1 > d2) {
+        length(i2) <- length(i1)    # make vectors same length, 
+        dMax <- d1                  # fill blanks with NAs   
+    } else  if(d1 < d2){
+        length(i1) <- length(i2)    # make vectors same length,
+        dMax <- d2                  # fill blanks with NAs   
+    }
+    
+    # zip fastener operations
+    index <- as.vector(matrix(c(i1, i2), ncol=dMax, byrow=T))
+    index <- index[!is.na(index)]         # remove NAs
+    
+    if(along==1){
+        colnames(df2) <- colnames(df1)   # keep 1st colnames                  
+        res <- rbind(df1,df2)[ index, ]  # reorder data frame
+    }
+    if(along==2) res <- cbind(df1,df2)[ , index]           
+    return(res)
+}
+
+
+# This functions purpose is to make the dataframe that contains all the data we want
+# and it formats it correctly too.
+# The function will take in a vector which contains the specific movie html
+# The end result will be a return of the dataframe for all info from IMDb cite.
+build_data <- function(movies_link){
+   n <- length(movies_link)
+   Ave_Rating <- vector()
+   Title <- vector()
+   Year <- vector()
+   Num_Ratings <- vector()
+   Genres <- vector()
+   US_Gross <- vector()
+   Budget <- vector()
+   Top_Billed_Actors <- vector()
+   for(i in 1:n){
+      html <- read_html(movies_link[i])
+      
+      title <- c(Title,movies_title(html))
+
+      year <- c(Year,movies_year(html))
+
+      rating <- c(Ave_Rating,movies_average_rating(html))
+
+      num_ratings <- c(Num_Ratings, movies_num_ratings(html))
+
+      genres <- c(Genres, movies_genre(html))
+
+      gross <- c(US_Gross, movies_usgross(html))
+
+      budget <- c(Budget, movies_budget(html))
+
+      actors <- c(Top_Billed_Actors, movies_actors(html))
+      
+   }
+   
+   
+   ReviewsDf <- data.frame(t(sapply(movies_link, FUN = movies_reviews, USE.NAMES = FALSE)))
+   names(ReviewsDf) <- paste("Review_", 1:25)
+   
+   Reviews_Help_RatioDf <- data.frame(t(sapply(movies_link, FUN = movies_reviews_ratio, USE.NAMES = FALSE)))
+   names(Reviews_Help_RatioDf) <- paste("Review_Helpfulness", 1:25)
+   
+   df<- data.frame(title, year, budget, gross, genres, rating, num_ratings, actors)
+   
+   #ReviewsDf <- zipFastener(ReviewsDf,Reviews_Help_RatioDf) 
+   
+   Data<-cbind(df,ReviewsDf,Reviews_Help_RatioDf)
+   return(Data)
+}
+```
+
+```{R}
+#data1 <- build_data(movies_link[1:100])
+#data2 <- build_data(movies_link[101:200])
+#data3 <- build_data(movies_link[201:300])
+#data4 <- build_data(movies_link[301:400])
+#data5 <- build_data(movies_link[401:500])
+#data6 <- build_data(movies_link[501:600])
+#data7 <- build_data(movies_link[601:700])
+#data8 <- build_data(movies_link[701:800])
+#data9 <- build_data(movies_link[801:900])
+#data10 <- build_data(movies_link[901:1000])
+#data <- rbind(data1,data2,data3,data4,data5,data6,data7,data8,data9,data10)
+
+# My internet is not very good.
+#data <- build_data(movies_link[1:25])
+glimpse(data)
+full_data <- read_csv(file = "moviedata.csv")
+```
+
+
+
+_Mercy condition:_ If you are struggling to get these data in a reasonable form, a compiled, reasonably clean and accurate version for either the URL list or movie data will be added to Canvas called `imdb_urls.csv` and `moviedata.Rdata` respectively.  Use them to answer the following parts, if necessary. Your work in this part, even if not complete, can be scored for partial credit.
+
+2. (30 pts) Write code to plot the distributions of the first five variables listed above. Make sure missing values, if any, are handled gracefully. Your plots should be appropriately labeled, titled, colored, etc. Comment on the features each plot presents -- what information is gained by seeing these graphics?
+
+
+```{R}
+ggplot(full_data, aes(x = year, na.rm = TRUE)) + 
+   geom_histogram(stat = "bin", bins = 30,color = "white", fill = "lightblue")+ 
+   
+   labs(title = "Frequency of Movies Release Year For IMDb Top 1000 Movies", x = "Year", y = "Frequency") + 
+   
+   
+   geom_vline(aes(xintercept = median(year, na.rm = TRUE), color = "Median"), show.legend = TRUE, size = 1) + 
+   
+   geom_vline(aes(xintercept = mean(year, na.rm = TRUE),color = "Mean"), linetype = "dotted", show.legend = TRUE, size = 1) + 
+   
+   geom_text(aes(x=mean(year)-3, label= format(round(mean(year), 2), nsmall = 2), y=50), colour="black", angle=90)+
+   
+   geom_text(aes(x=median(year)-3, label=median(year), y=50), colour="darkgray", angle=90)+
+   
+   scale_color_manual(name = "Statistics", values = c("Mean" = "black", "Median" = "darkgray"))+
+   
+   theme_light()
+
+```
+
+```{R, warning = FALSE}
+budget_data <- full_data[!is.na(full_data$budget),3] 
+
+
+ggplot(budget_data, aes(x = budget)) + 
+   geom_histogram(stat = "bin", bins = 30,color = "white", fill = "lightblue")+ 
+   
+   labs(title = "Frequency of Movies Budget For IMDb Top 1000 Movies", x = "Budget($)", y = "Frequency") + 
+   
+   
+   geom_vline(aes(xintercept = median(budget), color = "Median"), show.legend = TRUE, size = 1) + 
+   
+   geom_vline(aes(xintercept = mean(budget),color = "Mean"), linetype = "dotted", show.legend = TRUE, size = 1) + 
+   
+   geom_text(aes(x=mean(budget)+15000000, label= format(round(mean(budget), 2), nsmall = 2), y=25), colour="black", angle=90)+
+   
+   geom_text(aes(x=median(budget)+20000000, label=median(budget), y=25), colour="darkgray", angle=90)+
+   
+   scale_color_manual(name = "Statistics", values = c("Mean" = "black", "Median" = "darkgray"))+
+   
+   xlim(0, max(budget_data)+1)+
+   ylim(0,50)+
+   
+   theme_light()
+```
+
+3Q
+
+```{R, warning = FALSE}
+budget_data <- budget_data[!rowSums(budget_data>(2.95*10^7)),1]
+
+ggplot(budget_data, aes(x = budget)) + 
+   geom_histogram(stat = "bin", bins = 30,color = "white", fill = "lightblue")+ 
+   
+   labs(title = "Frequency of Movies Budget For IMDb Top 1000 Movies", x = "Budget($)", y = "Frequency") + 
+   
+   
+   geom_vline(aes(xintercept = median(budget), color = "Median"), show.legend = TRUE, size = 1) + 
+   
+   geom_vline(aes(xintercept = mean(budget),color = "Mean"), linetype = "dotted", show.legend = TRUE, size = 1) + 
+   
+   geom_text(aes(x=mean(budget)-1000000, label= format(round(mean(budget), 2), nsmall = 2), y=50), colour="black", angle=90)+
+   
+   geom_text(aes(x=median(budget)-1000000, label=median(budget), y=50), colour="darkgray", angle=90)+
+   
+   scale_color_manual(name = "Statistics", values = c("Mean" = "black", "Median" = "darkgray"))+
+   
+   xlim(0, 2.95*10^7)+
+   ylim(0,100)+
+   
+   theme_light()
+
+```
+
+```{R, warning = FALSE}
+usgross_data <- full_data[!is.na(full_data$gross),4]
+summary(usgross_data)
+
+ggplot(usgross_data, aes(x = gross)) + 
+   geom_histogram(stat = "bin", bins = 30,color = "white", fill = "lightblue")+ 
+   
+   labs(title = "Frequency of Movies Gross Income For IMDb Top 1000 Movies", x = "Gross Income($)", y = "Frequency") + 
+   
+   
+   geom_vline(aes(xintercept = median(gross), color = "Median"), show.legend = TRUE, size = 1) + 
+   
+   geom_vline(aes(xintercept = mean(gross),color = "Mean"), linetype = "dotted", show.legend = TRUE, size = 1) + 
+   
+   geom_text(aes(x=mean(gross)+15000000, label= format(round(mean(gross), 2), nsmall = 2), y=75), colour="black", angle=90)+
+   
+   geom_text(aes(x=median(gross)+20000000, label=median(gross), y=75), colour="darkgray", angle=90)+
+   
+   scale_color_manual(name = "Statistics", values = c("Mean" = "black", "Median" = "darkgray"))+
+   
+   xlim(0, 936662226)+
+   ylim(0,175)+
+   
+   theme_light()
+
+usgross_data <- usgross_data[!rowSums(usgross_data>115817907),1]
+
+ggplot(usgross_data, aes(x = gross)) + 
+   geom_histogram(stat = "bin", bins = 30,color = "white", fill = "lightblue")+ 
+   
+   labs(title = "Frequency of Movies Gross Income For IMDb Top 1000 Movies", x = "Gross Income($)", y = "Frequency") + 
+   
+   
+   geom_vline(aes(xintercept = median(gross), color = "Median"), show.legend = TRUE, size = 1) + 
+   
+   geom_vline(aes(xintercept = mean(gross),color = "Mean"), linetype = "dotted", show.legend = TRUE, size = 1) + 
+   
+   geom_text(aes(x=mean(gross)-5000000, label= format(round(mean(gross), 2), nsmall = 2), y=50), colour="black", angle=90)+
+   
+   geom_text(aes(x=median(gross)-5000000, label=median(gross), y=50), colour="darkgray", angle=90)+
+   
+   scale_color_manual(name = "Statistics", values = c("Mean" = "black", "Median" = "darkgray"))+
+   
+   xlim(0, 115817907)+
+   ylim(0,100)+
+   
+   theme_light()
+
+```
+
+Q3
+
+
+```{R}
+num_rating_data <- full_data[!is.na(full_data$num_ratings),7]
+
+ggplot(num_rating_data, aes(x = num_ratings, na.rm = TRUE)) + 
+   geom_histogram(stat = "bin", bins = 30,color = "white", fill = "lightblue")+ 
+   
+   labs(title = "Frequency of Movies Number of Reviews For IMDb Top 1000 Movies", x = "Number of Reviews", y = "Frequency", text = element_text(size=10)) + 
+   
+   
+   geom_vline(aes(xintercept = median(num_ratings, na.rm = TRUE), color = "Median"), show.legend = TRUE, size = 1) + 
+   
+   geom_vline(aes(xintercept = mean(num_ratings, na.rm = TRUE),color = "Mean"), linetype = "dotted", show.legend = TRUE, size = 1) + 
+   
+   geom_text(aes(x=mean(num_ratings)-80000, label= format(round(mean(num_ratings), 2), nsmall = 2), y=100), colour="black", angle=90)+
+   
+   geom_text(aes(x=median(num_ratings)-80000, label=median(num_ratings), y=100), colour="darkgray", angle=90)+
+   
+   scale_color_manual(name = "Statistics", values = c("Mean" = "black", "Median" = "darkgray"))+
+   
+   theme_light()
+
+```
+
+```{R}
+rating_data <- full_data[!is.na(full_data$rating),6]
+
+ggplot(rating_data, aes(x = rating)) + 
+   geom_histogram(stat = "bin", binwidth = .1,color = "white", fill = "lightblue")+ 
+   
+   labs(title = "Frequency of Movies Average Review Rating For IMDb Top 1000 Movies", x = "Reviews Rating", y = "Frequency") + 
+   
+   
+   geom_vline(aes(xintercept = median(rating, na.rm = TRUE), color = "Median"), show.legend = TRUE, size = 1) + 
+   
+   geom_vline(aes(xintercept = mean(rating, na.rm = TRUE),color = "Mean"), linetype = "dotted", show.legend = TRUE, size = 1) + 
+   
+   geom_text(aes(x=mean(rating)+.04, label= format(round(mean(rating), 2), nsmall = 2), y=75), colour="black", angle=90)+
+   
+   geom_text(aes(x=median(rating)-.07, label=median(rating), y=75), colour="darkgray", angle=90)+
+   
+   scale_color_manual(name = "Statistics", values = c("Mean" = "black", "Median" = "darkgray"))+
+   
+   theme_light()
+
+```
+
+
+
+3. (20 pts) Complete a sentiment analyses on the 25 most helpful reviews for each movie. The choice of lexicon is up to you, but explain your reasons why your choice is the most reasonable/appropriate option. Add a summary of this information to your original data frame.
+
+```{R}
+#This function gets each reviews sentiment and returns a numeric value + good - bad 0 nuetral
+#This function takes in a string
+#This functon returns a numeric value
+sentiments_check <- function(x){
+   review_words1 <- x %>% mutate_all(as.character) %>% unnest_tokens(word,text)%>%
+   filter(!word %in% stop_words$word )
+   y<-sum((review_words1 %>% inner_join(get_sentiments("afinn"), by = "word") %>% select(word,value))$value)
+   return(y)
+}
+
+sentiment <- data.frame()
+for(i in 1:999){
+   x<-vector()
+   for(j in 9:33){
+      review_words<-tibble(line = 1, text = (full_data[i,j]))
+      if(is.na(review_words[1,2])){
+         x <- append(x,0)
+      }
+      else{
+         sent <-sentiments_check(review_words[1,2])
+         x<-append(x,sent)
+      }
+   }
+   sentiment <- rbind(sentiment, x)
+}
+
+df<-data.frame((sentiment))
+names(df)<-paste("Review_Sentiment_", 1:25)
+
+full_data <-cbind(full_data, df)
+```
+
+why affin
+why sum?
+
+4. (20 pts) Variable Relationships. Create one plot that displays the relationship (or lack thereof) between any of the movie variables. Your plot should be appropriately labeled, titled, colored, etc. Your plot should display at minimum 3 variables. A plot with more variables included will be scored more favorably (as long as the plot is reasonable and legible). Reviews and helpfulness/sentiment scores are considered aggregate variables (e.g., 25 helpfulness scores will be considered a single variable). Some questions that you might consider when creating your plot are below, though you are not limited to these questions. 
+   - Is there any evidence of a relationship between review helpfulness and review sentiment? 
+   - Do the review scores (from the most helpful reviews) generally agree with the overall IMDB average rating?
+   - Is there evidence of a relationship between average IMDB rating and a movie's gross? Does release year seem to have an effect on this relationship?
+   - Is there evidence of a relationship between a movie's budget and a movie's gross? Does release year seem to have an effect on this relationship? 
+   - Do any actors have an effect (positive or negative) on the relationship between budget, gross, or average IMDB rating? Is this pattern common across any genres?
+
+```{R}
+new_data <- full_data[!is.na(full_data$budget),c(2:4,6)]
+new_data <- new_data[!is.na(new_data$gross),1:4]
+new_data <- new_data %>% group_by(year) %>% summarise(mean_profit = median(gross-budget)/10^8, mean_rating = median(rating))
+
+ggplot(new_data, aes(x = year)) + 
+   geom_line(aes(y = mean_profit, color = "Median Profit In Year(In 100 millions of Dollars)"))+
+   geom_line(aes(y = mean_rating, color = "Median Rating In Year"))+
+   scale_colour_manual("", 
+                      breaks = c("Median Profit In Year(In 100 millions of Dollars)", "Median Rating In Year"),
+                      values = c("darkred", "steelblue")) +
+   scale_fill_discrete(name = "Line Variables", labels = c("Median Profit In Year(In 100 millions of Dollars)", "Median Rating In Year" ))+
+   labs(title= "Profits and Rating Comparison By Year For IMDb top 1000 Movies", x= "Year", y= "")+
+   theme_light()
+
+ggplot(new_data, aes(x = year)) + 
+   geom_line(aes(y = mean_profit, color = "Median Profit In Year(In 100 millions of Dollars)"))+
+   geom_line(aes(y = mean_rating-mean(mean_rating), color = "Median Rating In Year(Centered at Zero)"))+
+   scale_colour_manual("", 
+                      breaks = c("Median Profit In Year(In 100 millions of Dollars)", "Median Rating In Year(Centered at Zero)"),
+                      values = c("darkred", "steelblue")) +
+   scale_fill_discrete(name = "Line Variables", labels = c("Median Profit In Year(In 100 millions of Dollars)", "Median Rating In Year(Centered at Zero)" ))+
+   labs(title= "Profits and Rating Comparison By Year For IMDb top 1000 Movies", x= "Year", y= "")+
+   theme_light()
+  
+```
+  
+  
+  Good just explain well...
+  
+  
+
+
